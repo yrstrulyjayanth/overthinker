@@ -139,15 +139,81 @@ def robust_json_parser(text):
     except json.JSONDecodeError:
         return None
 
-def call_gemini_api(prompt, retries=2):
+def build_fallback_initial(user_scenario):
+    """Builds a local fallback response when API is unavailable."""
+    return {
+        "tree": {
+            "name": user_scenario,
+            "description": "Explore the possible outcomes",
+            "path": "root",
+            "children": [
+                {
+                    "name": "Best Case Scenario",
+                    "description": "Things go better than expected. You handle it well and gain confidence from the outcome.",
+                    "path": "0",
+                    "children": []
+                },
+                {
+                    "name": "Most Likely/Expected Scenario",
+                    "description": "It feels important, but the result is usually mixed and manageable rather than extreme.",
+                    "path": "1",
+                    "children": []
+                },
+                {
+                    "name": "Worst Case Scenario",
+                    "description": "Even if it goes poorly, the impact is temporary and you can recover with clear next steps.",
+                    "path": "2",
+                    "children": []
+                }
+            ]
+        },
+        "summary": "Your concern makes sense. Most situations are less catastrophic than they feel in the moment, and you usually have more options than your anxiety suggests."
+    }
+
+def build_fallback_expand(parent_path, path_name, path_description):
+    """Builds local child branches for an expanded node."""
+    return {
+        "children": [
+            {
+                "name": "Immediate Impact",
+                "description": f"In the short term, {path_name.lower()} may feel intense, but the first impact is usually manageable.",
+                "path": f"{parent_path}-0",
+                "children": []
+            },
+            {
+                "name": "How You Can Respond",
+                "description": "You can take one practical action, ask for support, and adjust based on what actually happens.",
+                "path": f"{parent_path}-1",
+                "children": []
+            },
+            {
+                "name": "Longer-Term Perspective",
+                "description": f"Over time, this becomes one part of a bigger story rather than a final definition of you. Context: {path_description}",
+                "path": f"{parent_path}-2",
+                "children": []
+            }
+        ]
+    }
+
+def call_gemini_api(prompt, retries=2, fallback_data=None):
     """Calls the Gemini API with error handling."""
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    model = genai.GenerativeModel('gemini-2.0-flash-lite')
     for attempt in range(retries + 1):
         try:
             response = model.generate_content(prompt)
             return robust_json_parser(response.text)
         except Exception as e:
+            error_text = str(e).lower()
+            quota_error = "429" in error_text or "quota" in error_text or "rate" in error_text
+
+            if quota_error and fallback_data is not None:
+                st.warning("Gemini quota unavailable right now. Using local fallback analysis.", icon="⚠️")
+                return fallback_data
+
             if attempt >= retries:
+                if fallback_data is not None:
+                    st.warning("API is unavailable. Using local fallback analysis.", icon="⚠️")
+                    return fallback_data
                 st.error(f"API call failed after {retries + 1} attempts: {e}", icon="🕸️")
                 return None
             st.warning(f"API call failed on attempt {attempt + 1}. Retrying...", icon="⚠️")
@@ -291,7 +357,8 @@ with col1:
             with st.spinner("Analyzing possible outcomes..."):
                 st.session_state.user_scenario = user_scenario_input
                 prompt = PROMPT_INITIAL.format(user_scenario=st.session_state.user_scenario)
-                ai_data = call_gemini_api(prompt)
+                fallback_initial = build_fallback_initial(st.session_state.user_scenario)
+                ai_data = call_gemini_api(prompt, fallback_data=fallback_initial)
                 if ai_data and 'tree' in ai_data:
                     st.session_state.current_tree = ai_data['tree']
                     st.session_state.history = [copy.deepcopy(st.session_state.current_tree)]
@@ -341,7 +408,12 @@ if st.session_state.current_tree:
                         path_description=node_in_state['description'],
                         parent_path=clicked_path
                     )
-                    expanded_data = call_gemini_api(prompt)
+                    fallback_expand = build_fallback_expand(
+                        clicked_path,
+                        node_in_state['name'],
+                        node_in_state['description']
+                    )
+                    expanded_data = call_gemini_api(prompt, fallback_data=fallback_expand)
 
                     if expanded_data and 'children' in expanded_data:
                         st.session_state.history.append(copy.deepcopy(st.session_state.current_tree))
