@@ -50,11 +50,13 @@ pip install -r requirements.txt
 ```
 
 4. Set up your API key:
-   - Create a `.streamlit` folder if it doesn't exist
-   - Create a `secrets.toml` file inside it
-   - Add your Google API key:
+   - Copy the example secrets file:
+```bash
+cp .streamlit/secrets.toml.example .streamlit/secrets.toml
+```
+   - Edit `.streamlit/secrets.toml` and add your Google API key:
 ```toml
-GOOGLE_API_KEY = "your-api-key-here"
+GOOGLE_API_KEY = "your-actual-api-key-here"
 ```
 
 ### Running the App
